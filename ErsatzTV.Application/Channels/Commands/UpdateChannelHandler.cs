@@ -1,7 +1,6 @@
 ﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
-using ErsatzTV.Application.Playouts;
 using ErsatzTV.Application.Subtitles;
 using ErsatzTV.Core;
 using ErsatzTV.Core.Domain;
@@ -161,7 +160,6 @@ public class UpdateChannelHandler(
         if (hasEpgChange)
         {
             await workerChannel.WriteAsync(new RefreshChannelData(c.Number), cancellationToken);
-            await workerChannel.WriteAsync(new SyncNextPlayout(c.Number), cancellationToken);
         }
 
         return ProjectToViewModel(c, c.Playouts?.Count ?? 0);

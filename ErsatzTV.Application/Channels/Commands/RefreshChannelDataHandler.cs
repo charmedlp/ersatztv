@@ -215,18 +215,6 @@ public class RefreshChannelDataHandler : IRequestHandler<RefreshChannelData>
                 .AsSplitQuery()
                 .ToListAsync(cancellationToken);
 
-            // apply playout offset to all items consistently
-            foreach (Playout playout in playouts)
-            {
-                foreach (PlayoutItem item in playout.Items)
-                {
-                    item.Start += playoutOffset;
-                    item.GuideStart += playoutOffset;
-                    item.Finish += playoutOffset;
-                    item.GuideFinish += playoutOffset;
-                }
-            }
-
             await using RecyclableMemoryStream ms = _recyclableMemoryStreamManager.GetStream();
             await using var xml = XmlWriter.Create(
                 ms,
@@ -250,6 +238,11 @@ public class RefreshChannelDataHandler : IRequestHandler<RefreshChannelData>
                             .OrderBy(pi => pi.Start)
                             .Filter(pi => pi.StartOffset <= finish)
                             .ToList();
+                        foreach (var item in floodSorted)
+                        {
+                            item.Start += playoutOffset;
+                            item.Finish += playoutOffset;
+                        }
 
                         await WritePlayoutXml(
                             request,
@@ -271,6 +264,11 @@ public class RefreshChannelDataHandler : IRequestHandler<RefreshChannelData>
                             .OrderBy(pi => pi.Start)
                             .Filter(pi => pi.StartOffset <= finish)
                             .ToList();
+                        foreach (var item in blockSorted)
+                        {
+                            item.Start += playoutOffset;
+                            item.Finish += playoutOffset;
+                        }
 
                         await WriteBlockPlayoutXml(
                             request,
@@ -290,6 +288,11 @@ public class RefreshChannelDataHandler : IRequestHandler<RefreshChannelData>
                         var externalJsonSorted = (await CollectExternalJsonItems(playout.ScheduleFile))
                             .Filter(pi => pi.StartOffset <= finish)
                             .ToList();
+                        foreach (var item in externalJsonSorted)
+                        {
+                            item.Start += playoutOffset;
+                            item.Finish += playoutOffset;
+                        }
 
                         await WritePlayoutXml(
                             request,

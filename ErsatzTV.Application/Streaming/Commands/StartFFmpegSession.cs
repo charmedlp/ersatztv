@@ -2,12 +2,6 @@
 
 namespace ErsatzTV.Application.Streaming;
 
-public record StartFFmpegSession(
-    string ChannelNumber,
-    string Mode,
-    string Scheme,
-    string Host,
-    string PathBase,
-    string AccessTokenQuery) :
-    IRequest<Either<BaseError, string>>,
+public record StartFFmpegSession(string ChannelNumber, string Mode, string Scheme, string Host) :
+    IRequest<Either<BaseError, Unit>>,
     IFFmpegWorkerRequest;

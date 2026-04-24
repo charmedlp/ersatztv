@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using CliWrap;
 using ErsatzTV.Application.Channels;
 using ErsatzTV.Application.Images;
@@ -89,15 +91,6 @@ public class IptvController : StreamingControllerBase
         if (maybeChannel.IsNone || !await maybeChannel.Map(c => c.IsEnabled).IfNoneAsync(false))
         {
             return NotFound();
-        }
-
-        foreach (ChannelViewModel channel in maybeChannel)
-        {
-            // NEXT: MPEG-TS streams are not (yet?) supported
-            if (!channel.IsEnabled || channel.StreamingEngine is StreamingEngine.Next)
-            {
-                return NotFound();
-            }
         }
 
         // if mode is "unspecified" - find the configured mode and set it or redirect
@@ -231,26 +224,11 @@ public class IptvController : StreamingControllerBase
                     "Maybe starting ffmpeg session for channel {Channel}, mode {Mode}",
                     channelNumber,
                     mode);
-                StreamingEngine streamingEngine =
-                    await maybeChannel.Map(c => c.StreamingEngine).IfNoneAsync(StreamingEngine.Legacy);
-                IRequest<Either<BaseError, string>> request = streamingEngine is StreamingEngine.Legacy
-                    ? new StartFFmpegSession(
-                        channelNumber,
-                        mode,
-                        Request.Scheme,
-                        Request.Host.ToString(),
-                        Request.PathBase,
-                        AccessTokenQuery())
-                    : new StartFFmpegNextSession(
-                        channelNumber,
-                        mode,
-                        Request.Scheme,
-                        Request.Host.ToString(),
-                        Request.PathBase,
-                        AccessTokenQuery());
-                Either<BaseError, string> result = await _mediator.Send(request);
+                var request = new StartFFmpegSession(channelNumber, mode, Request.Scheme, Request.Host.ToString());
+                Either<BaseError, Unit> result = await _mediator.Send(request);
+                string multiVariantPlaylist = await GetMultiVariantPlaylist(channelNumber);
                 return result.Match<IActionResult>(
-                    multiVariantPlaylist =>
+                    _ =>
                     {
                         _logger.LogDebug(
                             "Session started; returning multi-variant playlist for channel {Channel}",
@@ -263,12 +241,12 @@ public class IptvController : StreamingControllerBase
                     {
                         switch (error)
                         {
-                            case ChannelSessionAlreadyActive active:
+                            case ChannelSessionAlreadyActive:
                                 _logger.LogDebug(
                                     "Session is already active; returning multi-variant playlist for channel {Channel}",
                                     channelNumber);
 
-                                return Content(active.MultiVariantPlaylist, "application/vnd.apple.mpegurl");
+                                return Content(multiVariantPlaylist, "application/vnd.apple.mpegurl");
                             // return RedirectPreserveMethod($"iptv/session/{channelNumber}/hls.m3u8");
                             default:
                                 _logger.LogWarning(
@@ -310,6 +288,54 @@ public class IptvController : StreamingControllerBase
     [HttpGet("iptv/hls-direct/{channelNumber}.mp4")]
     public async Task<IActionResult> GetStream(string channelNumber) =>
         await GetHlsDirectStream(channelNumber);
+
+    private async Task<string> GetMultiVariantPlaylist(string channelNumber)
+    {
+        var variantPlaylist =
+            $"{Request.Scheme}://{Request.Host}{Request.PathBase}/iptv/session/{channelNumber}/hls.m3u8{AccessTokenQuery()}";
+
+        Option<ChannelStreamingSpecsViewModel> maybeStreamingSpecs =
+            await _mediator.Send(new GetChannelStreamingSpecs(channelNumber));
+        string resolution = string.Empty;
+        var bitrate = "10000000";
+        foreach (ChannelStreamingSpecsViewModel streamingSpecs in maybeStreamingSpecs)
+        {
+            string videoCodec = streamingSpecs.VideoFormat switch
+            {
+                FFmpegProfileVideoFormat.Av1 => "av01.0.01M.08",
+                FFmpegProfileVideoFormat.Hevc => "hvc1.1.6.L93.B0",
+                FFmpegProfileVideoFormat.H264 => "avc1.4D4028",
+                _ => string.Empty
+            };
+
+            string audioCodec = streamingSpecs.AudioFormat switch
+            {
+                FFmpegProfileAudioFormat.Ac3 => "ac-3",
+                FFmpegProfileAudioFormat.Aac or FFmpegProfileAudioFormat.AacLatm => "mp4a.40.2",
+                _ => string.Empty
+            };
+
+            List<string> codecStrings = [];
+            if (!string.IsNullOrWhiteSpace(videoCodec))
+            {
+                codecStrings.Add(videoCodec);
+            }
+
+            if (!string.IsNullOrWhiteSpace(audioCodec))
+            {
+                codecStrings.Add(audioCodec);
+            }
+
+            string codecs = codecStrings.Count > 0 ? $",CODECS=\"{string.Join(",", codecStrings)}\"" : string.Empty;
+            resolution = $",RESOLUTION={streamingSpecs.Width}x{streamingSpecs.Height}{codecs}";
+            bitrate = streamingSpecs.Bitrate.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return $@"#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-STREAM-INF:BANDWIDTH={bitrate}{resolution}
+{variantPlaylist}";
+    }
 
     private async Task<IActionResult> GetHlsDirectStream(string channelNumber)
     {

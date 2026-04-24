@@ -81,9 +81,6 @@ public class WorkerService : BackgroundService
                                     error.Value));
                             break;
                         }
-                        case SyncNextPlayout syncNextPlayout:
-                            await mediator.Send(syncNextPlayout, stoppingToken);
-                            break;
                         case CheckForOverlappingPlayoutItems checkForOverlappingPlayoutItems:
                             await mediator.Send(checkForOverlappingPlayoutItems, stoppingToken);
                             break;

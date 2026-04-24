@@ -1,6 +1,8 @@
 ﻿namespace ErsatzTV.Core.Errors;
 
-public class ChannelSessionAlreadyActive(string multiVariantPlaylist) : BaseError("Channel already has HLS session")
+public class ChannelSessionAlreadyActive : BaseError
 {
-    public string MultiVariantPlaylist { get; } = multiVariantPlaylist;
+    public ChannelSessionAlreadyActive() : base("Channel already has HLS session")
+    {
+    }
 }

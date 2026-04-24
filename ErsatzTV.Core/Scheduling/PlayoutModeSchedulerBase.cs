@@ -161,8 +161,15 @@ public abstract class PlayoutModeSchedulerBase<T>(ILogger logger) : IPlayoutMode
 
                 if (nextState.CurrentTime + itemDuration > nextItemStart)
                 {
+                    TimeSpan remaining = nextItemStart - nextState.CurrentTime;
+                    if (remaining < enumerator.MinimumDuration)
+                    {
+                        break;
+                    }
+
                     warnings.TailFillerTooLong++;
-                    break;
+                    enumerator.MoveNext(nextState.CurrentTime);
+                    continue;
                 }
 
                 var playoutItem = new PlayoutItem
@@ -210,27 +217,19 @@ public abstract class PlayoutModeSchedulerBase<T>(ILogger logger) : IPlayoutMode
             IMediaCollectionEnumerator enumerator =
                 collectionEnumerators[CollectionKey.ForFillerPreset(scheduleItem.FallbackFiller)];
 
-            while (enumerator.Current.IsSome && nextState.CurrentTime < nextItemStart)
+            foreach (MediaItem mediaItem in enumerator.Current)
             {
-                MediaItem mediaItem = enumerator.Current.ValueUnsafe();
-
-                TimeSpan itemDuration = mediaItem.GetDurationForPlayout();
-                TimeSpan gap = nextItemStart - nextState.CurrentTime;
-                TimeSpan duration = itemDuration < gap ? itemDuration : gap;
-                TimeSpan inPoint = InPointForMediaItem(mediaItem);
-
                 var playoutItem = new PlayoutItem
                 {
                     PlayoutId = playoutBuilderState.PlayoutId,
-                    MediaItemId = IdForMediaItem(mediaItem),
+                    MediaItemId = mediaItem.Id,
                     Start = nextState.CurrentTime.UtcDateTime,
-                    Finish = nextState.CurrentTime.Add(duration).UtcDateTime,
-                    InPoint = inPoint,
-                    OutPoint = inPoint + duration,
+                    Finish = nextItemStart.UtcDateTime,
+                    InPoint = TimeSpan.Zero,
+                    OutPoint = TimeSpan.Zero,
                     GuideGroup = nextState.NextGuideGroup,
                     FillerKind = FillerKind.Fallback,
                     DisableWatermarks = !scheduleItem.FallbackFiller.AllowWatermarks,
-                    ChapterTitle = ChapterTitleForMediaItem(mediaItem),
                     SchedulingContext = GetSchedulingContext(scheduleItem, scheduleItem.FallbackFillerId, enumerator)
                 };
 
@@ -238,7 +237,7 @@ public abstract class PlayoutModeSchedulerBase<T>(ILogger logger) : IPlayoutMode
 
                 nextState = nextState with
                 {
-                    CurrentTime = nextState.CurrentTime.Add(duration)
+                    CurrentTime = nextItemStart.UtcDateTime
                 };
 
                 enumerator.MoveNext(playoutItem.StartOffset);
@@ -712,14 +711,14 @@ public abstract class PlayoutModeSchedulerBase<T>(ILogger logger) : IPlayoutMode
                                         ? leftOverall
                                         : leftInThisBreak;
 
-                                    List<PlayoutItem> fallbackItems = FallbackFillerForPad(
+                                    Option<PlayoutItem> maybeFallback = FallbackFillerForPad(
                                         playoutBuilderState,
                                         enumerators,
                                         scheduleItem,
                                         i < filteredChapters.Count - 1 ? maxThisBreak : leftOverall,
                                         cancellationToken);
 
-                                    foreach (PlayoutItem fallback in fallbackItems)
+                                    foreach (PlayoutItem fallback in maybeFallback)
                                     {
                                         current += fallback.Finish - fallback.Start;
                                         filled += fallback.Finish - fallback.Start;
@@ -872,55 +871,41 @@ public abstract class PlayoutModeSchedulerBase<T>(ILogger logger) : IPlayoutMode
         return result;
     }
 
-    private static List<PlayoutItem> FallbackFillerForPad(
+    private static Option<PlayoutItem> FallbackFillerForPad(
         PlayoutBuilderState playoutBuilderState,
         Dictionary<CollectionKey, IMediaCollectionEnumerator> enumerators,
         ProgramScheduleItem scheduleItem,
         TimeSpan duration,
         CancellationToken cancellationToken)
     {
-        var result = new List<PlayoutItem>();
-
         if (scheduleItem.FallbackFiller != null)
         {
             IMediaCollectionEnumerator enumerator =
                 enumerators[CollectionKey.ForFillerPreset(scheduleItem.FallbackFiller)];
 
-            TimeSpan remainingToFill = duration;
-            DateTimeOffset currentTime = new DateTimeOffset(2020, 2, 1, 0, 0, 0, TimeSpan.Zero);
-
-            while (enumerator.Current.IsSome && remainingToFill > TimeSpan.Zero)
+            foreach (MediaItem mediaItem in enumerator.Current)
             {
-                MediaItem mediaItem = enumerator.Current.ValueUnsafe();
-                TimeSpan itemDuration = mediaItem.GetDurationForPlayout();
-                TimeSpan currentDuration = itemDuration < remainingToFill ? itemDuration : remainingToFill;
-                TimeSpan inPoint = InPointForMediaItem(mediaItem);
-
-                var playoutItem = new PlayoutItem
+                var result = new PlayoutItem
                 {
                     PlayoutId = playoutBuilderState.PlayoutId,
-                    MediaItemId = IdForMediaItem(mediaItem),
-                    Start = currentTime.UtcDateTime,
-                    Finish = currentTime.Add(currentDuration).UtcDateTime,
-                    InPoint = inPoint,
-                    OutPoint = inPoint + currentDuration,
+                    MediaItemId = mediaItem.Id,
+                    Start = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Finish = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) + duration,
+                    InPoint = TimeSpan.Zero,
+                    OutPoint = TimeSpan.Zero,
                     GuideGroup = playoutBuilderState.NextGuideGroup,
                     FillerKind = FillerKind.Fallback,
-                    DisableWatermarks = !scheduleItem.FallbackFiller.AllowWatermarks,
-                    ChapterTitle = ChapterTitleForMediaItem(mediaItem)
+                    DisableWatermarks = !scheduleItem.FallbackFiller.AllowWatermarks
                 };
-
-                result.Add(playoutItem);
-
-                remainingToFill -= currentDuration;
-                currentTime += currentDuration;
 
                 // TODO: this won't work with reruns
                 enumerator.MoveNext(Option<DateTimeOffset>.None);
+
+                return result;
             }
         }
 
-        return result;
+        return None;
     }
 
     private List<PlayoutItem> AddRandomCountFiller(

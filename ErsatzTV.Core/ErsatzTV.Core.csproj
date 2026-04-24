@@ -45,7 +45,6 @@
 
     <ItemGroup>
       <Folder Include="Api\" />
-      <Folder Include="Next\Config\" />
     </ItemGroup>
 
 </Project>
