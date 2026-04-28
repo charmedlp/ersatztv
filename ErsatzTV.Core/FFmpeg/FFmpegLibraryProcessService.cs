@@ -161,6 +161,7 @@ public class FFmpegLibraryProcessService : IFFmpegProcessService
                     channel,
                     preferredSubtitleLanguage,
                     subtitleMode,
+                    shouldLogMessages: true,
                     cancellationToken);
         }
 

@@ -1195,6 +1195,7 @@ public class TranscodingTests
             Channel channel,
             string preferredSubtitleLanguage,
             ChannelSubtitleMode subtitleMode,
+            bool shouldLogMessages,
             CancellationToken cancellationToken) =>
             subtitles.HeadOrNone().AsTask();
     }

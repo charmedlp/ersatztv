@@ -21,5 +21,6 @@ public interface IFFmpegStreamSelector
         Channel channel,
         string preferredSubtitleLanguage,
         ChannelSubtitleMode subtitleMode,
+        bool shouldLogMessages,
         CancellationToken cancellationToken);
 }

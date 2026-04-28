@@ -131,12 +131,17 @@ public class FFmpegStreamSelector : IFFmpegStreamSelector
         Channel channel,
         string preferredSubtitleLanguage,
         ChannelSubtitleMode subtitleMode,
+        bool shouldLogMessages,
         CancellationToken cancellationToken)
     {
         if (channel.MusicVideoCreditsMode is ChannelMusicVideoCreditsMode.GenerateSubtitles &&
             subtitles.FirstOrDefault(s => s.SubtitleKind == SubtitleKind.Generated) is { } generatedSubtitle)
         {
-            _logger.LogDebug("Selecting generated subtitle for channel {Number}", channel.Number);
+            if (shouldLogMessages)
+            {
+                _logger.LogDebug("Selecting generated subtitle for channel {Number}", channel.Number);
+            }
+
             return Optional(generatedSubtitle);
         }
 
@@ -153,7 +158,11 @@ public class FFmpegStreamSelector : IFFmpegStreamSelector
 
         if (!useEmbeddedSubtitles)
         {
-            _logger.LogDebug("Ignoring embedded subtitles for channel {Number}", channel.Number);
+            if (shouldLogMessages)
+            {
+                _logger.LogDebug("Ignoring embedded subtitles for channel {Number}", channel.Number);
+            }
+
             candidateSubtitles = candidateSubtitles.Filter(s => s.SubtitleKind is not SubtitleKind.Embedded).ToList();
         }
 
@@ -165,17 +174,23 @@ public class FFmpegStreamSelector : IFFmpegStreamSelector
             {
                 if (!subtitle.IsExtracted)
                 {
-                    _logger.LogDebug(
-                        "Ignoring embedded subtitle with index {Index} that has not been extracted",
-                        subtitle.StreamIndex);
+                    if (shouldLogMessages)
+                    {
+                        _logger.LogDebug(
+                            "Ignoring embedded subtitle with index {Index} that has not been extracted",
+                            subtitle.StreamIndex);
+                    }
 
                     candidateSubtitles.Remove(subtitle);
                 }
                 else if (string.IsNullOrWhiteSpace(subtitle.Path))
                 {
-                    _logger.LogDebug(
-                        "BUG: ignoring embedded subtitle with index {Index} that is missing a path",
-                        subtitle.StreamIndex);
+                    if (shouldLogMessages)
+                    {
+                        _logger.LogDebug(
+                            "BUG: ignoring embedded subtitle with index {Index} that is missing a path",
+                            subtitle.StreamIndex);
+                    }
 
                     candidateSubtitles.Remove(subtitle);
                 }
@@ -186,7 +201,10 @@ public class FFmpegStreamSelector : IFFmpegStreamSelector
         string language = (preferredSubtitleLanguage ?? string.Empty).ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(language))
         {
-            _logger.LogDebug("Channel {Number} has no preferred subtitle language code", channel.Number);
+            if (shouldLogMessages)
+            {
+                _logger.LogDebug("Channel {Number} has no preferred subtitle language code", channel.Number);
+            }
         }
         else
         {
@@ -194,7 +212,10 @@ public class FFmpegStreamSelector : IFFmpegStreamSelector
             allCodes = GetTwoAndThreeLetterLanguageCodes(_languageCodeService.GetAllLanguageCodes([language]));
             if (allCodes.Count > 1)
             {
-                _logger.LogDebug("Preferred subtitle language has multiple codes {Codes}", allCodes);
+                if (shouldLogMessages)
+                {
+                    _logger.LogDebug("Preferred subtitle language has multiple codes {Codes}", allCodes);
+                }
             }
 
             candidateSubtitles = candidateSubtitles
@@ -225,16 +246,23 @@ public class FFmpegStreamSelector : IFFmpegStreamSelector
 
             foreach (Subtitle subtitle in maybeSelectedSubtitle)
             {
-                _logger.LogDebug("Selecting subtitle {@Subtitle}", subtitle);
+                if (shouldLogMessages)
+                {
+                    _logger.LogDebug("Selecting subtitle {@Subtitle}", subtitle);
+                }
+
                 return subtitle;
             }
         }
 
-        _logger.LogDebug(
-            "Found no subtitles for channel {ChannelNumber} with mode {Mode} matching language {Language}",
-            channel.Number,
-            subtitleMode,
-            allCodes);
+        if (shouldLogMessages)
+        {
+            _logger.LogDebug(
+                "Found no subtitles for channel {ChannelNumber} with mode {Mode} matching language {Language}",
+                channel.Number,
+                subtitleMode,
+                allCodes);
+        }
 
         return None;
     }
