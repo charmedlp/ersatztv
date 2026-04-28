@@ -6,9 +6,10 @@
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "DOTNET_ENVIRONMENT": "Development",
-        "ETV_STREAMING_PORT": "8409",
+        "ETV_STREAMING_PORT": "8411",
         "ETV_UI_PORT": "8410",
-        "ETV_NEXT_FOLDER": "~/code/ErsatzTV/next/target/debug"
+        "ETV_NEXT_FOLDER": "~/code/ErsatzTV/next/target/debug",
+        "ETV_CONFIG_FOLDER": "C:\\Users\\charm\\etv-dev"
       }
     }
   }

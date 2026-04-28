@@ -47,9 +47,14 @@ public class Program
 
     public static async Task<int> Main(string[] args)
     {
+        string configFolder = Environment.GetEnvironmentVariable("ETV_CONFIG_FOLDER") ?? string.Empty;
+        string mutexSuffix = string.IsNullOrWhiteSpace(configFolder)
+            ? "74360cd8985c4d1fb6bc9e81887206fe"
+            : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(configFolder.ToLowerInvariant())))[..32];
         using var _ = new Mutex(
             true,
-            "Global\\ErsatzTV.Singleton.74360cd8985c4d1fb6bc9e81887206fe",
+            $"Global\\ErsatzTV.Singleton.{mutexSuffix}",
             out bool createdNew);
         if (!createdNew)
         {
