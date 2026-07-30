@@ -27,6 +27,10 @@ public class GraphicsEngine(
             ConfigElementKey.FFprobePath,
             cancellationToken);
 
+        Option<string> ffmpegPath = await configElementRepository.GetValue<string>(
+            ConfigElementKey.FFmpegPath,
+            cancellationToken);
+
         var elements = new List<IGraphicsElement>();
         foreach (GraphicsElementContext element in context.Elements)
         {
@@ -41,7 +45,7 @@ public class GraphicsEngine(
 
                     break;
 
-                case ImageElementContext imageElementContext:
+                case ImageElementDataContext imageElementContext:
                     elements.Add(new ImageElement(imageElementContext.ImageElement, logger));
                     break;
 
@@ -54,6 +58,7 @@ public class GraphicsEngine(
                         new MotionElement(
                             motionElementDataContext.MotionElement,
                             ffprobePath,
+                            ffmpegPath,
                             localStatisticsProvider,
                             logger));
                     break;
@@ -74,6 +79,7 @@ public class GraphicsEngine(
                         templateFunctions,
                         tempFilePool,
                         subtitleElementContext.SubtitleElement,
+                        ffmpegPath,
                         variables,
                         logger);
 
@@ -184,12 +190,20 @@ public class GraphicsEngine(
                                             SKColors.White.WithAlpha((byte)(preparedImage.Opacity * 255)),
                                             SKBlendMode.Modulate);
                                         paint.ColorFilter = colorFilter;
-                                        canvas.DrawBitmap(preparedImage.Image, preparedImage.Point, paint);
+                                        canvas.DrawBitmap(
+                                            preparedImage.Image,
+                                            preparedImage.Point,
+                                            SKSamplingOptions.Default,
+                                            paint);
                                     }
                                     else
                                     {
                                         paint.ColorFilter = null;
-                                        canvas.DrawBitmap(preparedImage.Image, preparedImage.Point, paint);
+                                        canvas.DrawBitmap(
+                                            preparedImage.Image,
+                                            preparedImage.Point,
+                                            SKSamplingOptions.Default,
+                                            paint);
                                     }
 
                                     if (preparedImage.Dispose)

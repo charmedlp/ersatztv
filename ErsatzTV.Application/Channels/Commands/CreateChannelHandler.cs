@@ -86,6 +86,7 @@ public class CreateChannelHandler(
                 MirrorSourceChannelId = request.MirrorSourceChannelId,
                 PlayoutOffset = request.PlayoutOffset,
                 StreamingEngine = request.StreamingEngine,
+                NextEngineTextSubtitleMode = request.NextEngineTextSubtitleMode,
                 StreamingMode = request.StreamingMode,
                 Artwork = artwork,
                 StreamSelectorMode = request.StreamSelectorMode,
@@ -113,7 +114,9 @@ public class CreateChannelHandler(
                 channel.PlayoutOffset = null;
             }
 
-            if (channel.StreamingEngine is StreamingEngine.Next)
+            if (channel.StreamingEngine is StreamingEngine.Next &&
+                channel.StreamingMode is not StreamingMode.HttpLiveStreamingSegmenter &&
+                channel.StreamingMode is not StreamingMode.TransportStreamHybrid)
             {
                 channel.StreamingMode = StreamingMode.HttpLiveStreamingSegmenter;
             }

@@ -4,10 +4,110 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
+### Fixed
+- Fix regression from `v26.2.0` that caused channel logo watermarks to be ignored when the logo is a url
+  - This affected external logo urls and generated channel logos
+
+## [26.7.0] - 2026-07-27
+### Added
+- Show Legacy, Next and FFmpeg versions in **Troubleshooting** > **General**
+
+### Changed
+- Upgrade all bundled versions of ffmpeg from 7.1 to 8.1.2
+  - Other versions (`linux64` and `linuxarm64`) are available at https://github.com/ErsatzTV/ErsatzTV-ffmpeg/releases/tag/8.1.2
+
+### Fixed
+- Update Plex movie and other video titles when changed from Plex
+  - The first library scan after updating will act like a deep scan due to adding title to the Plex etag calculation
+  - Future periodic scans will update titles in ETV automatically (deep scans will not be required to update titles)
+- Randomize start points on playlist items in classic schedules when setting is enabled
+  - Playlists ignored this setting in earlier builds
+- Always randomize start points for all collections the first time they are used
+  - Previously, only collections scheduled during the first day of a playout build had their start points randomized
+- Allow multiple ETV instances when multiple config folders are used
+- Maintain collection progress when refreshing a classic playout
+  - Classic playouts save a checkpoint for each day they build, and refresh rewinds to the checkpoint for the current day
+  - Checkpoints were only saved when a build happened to stop on a day boundary, so playouts with long items (movies, long blocks) were often missing the checkpoint for the current day, and refreshing those restarted every collection from the beginning
+  - Checkpoints are now saved whenever a build crosses midnight
+- Fix case where shuffled collection progress would reset early
+  - This only happened when also grouping episodes (e.g. `Keep Multi-Part Episodes Together`)
+  - More groups made it more likely to happen
+- Fix marathons and playlists that would never pick a new order
+  - `Marathon Shuffle Groups` and `Shuffle Playlist Items` choose a new order every time everything has played once
+  - Content that can never play was still counted as waiting to play, so that never happened and the order stayed the same forever
+  - This was caused by specials (season 0), which are skipped by `Season, Episode` order; marathons grouped by show or season use that order unless `Marathon Shuffle Items` is enabled
+  - Affected playouts also became slower to build the longer they ran
+- Fix shuffled playlists and marathon groups changing order when a playout is rebuilt (continued or refreshed)
+  - Existing playlists and marathons will change order once after updating
+- Fix playlists used as filler skipping content
+  - When something doesn't fit, ETV puts the filler back where it was and tries again, but playlists were only partly put back
+  - This could skip playlist content, and could cause the next playout build to resume in the wrong place
+- Fix case where block playouts would occasionally get stuck building forever
+- Fix green line sometimes seen with NVIDIA and AMD/VAAPI encoding
+  - Both bugs were in ffmpeg, and ETV's patched ffmpeg 8.1.2 is required for the fixes
+- Pass extracted subtitle paths to next engine; this fixes text subtitle burn-in when extraction is enabled
+  - Embedded text subtitles will otherwise be ignored and unused (when extraction is disabled)
+- Fix next engine music video playback when music video credits are disabled
+- Fix playback when seeking into content beyond final text subtitle cue
+
+## [26.6.0] - 2026-07-09
+### Added
+- Add channel config overlay system for Next engine
+  - The channel config schema can be found at https://github.com/ErsatzTV/next/blob/main/schema/channel_config.json
+  - Config overlays should be created in the config subfolder `next/channel-config-overlays`
+    - A config file named `default.json` will apply to all channels using the Next engine
+    - A config file named `{channel_number}.json` (e.g. `1.json`) will apply to the channel with that number
+  - Channel overlays will override values from the default overlay which will override values from the FFmpeg Profile
+- Add `epg_entries` support to image graphics elements
+- Add (date-range based) alternate schedule system for sequential schedules
+
+### Fixed
+- Fix HLS Direct playback when JWT auth is also used
+- Use configured ffmpeg path for motion and subtitle graphics elements
+  - Previously, these elements required ffmpeg to be on PATH
+- Fix erroneous warning `Unable to locate MPEG-TS Script in folder Default` on installations with case-sensitive file systems
+- Improve speed of motion graphics element compositing
+- Fix multiple issues with subtitle handling in local libraries which impacted stream selection
+  - Content with multiple sidecar subtitles would incorrectly have the subtitle metadata merged (like language)
+  - More rarely, content with an embedded subtitle that has stream index zero would create invalid subtitle records
+  - Both cases will automatically be cleaned up during the next local library scan
+- Use `und` language tag with sidecar subtitles that have no language in the file name
+- Automatically remove already-played playout items from all on demand channels
+- Automatically remove already-played playout items from (continuous) scripted schedules
+- Extract embedded text subtitles (when enabled in settings) on channels that use custom stream selectors
+- Fix subtitle playback using Next streaming engine
+- Fix bug where search results for deleted manual collections would continue to appear
+- Fix synchronizing subtitle titles from Plex content; this may never have worked previously
+
+### Changed
+- Upgrade Intel driver in docker containers to support latest Battlemage devices (e.g. B70)
+- Restore release notes section on home page, since bugs continue to be fixed
+
+## [26.5.1] - 2026-05-08
+### Fixed
+- Fix NVIDIA playback on Linux using legacy streaming engine
+- Fix cause of unnecessarily large database when using Emby or Jellyfin libraries
+  - This was caused by orphaned actor and actor artwork records, which will be cleaned up hourly
+  - When you see logs like `No orphaned actors to delete` and `No orphaned artwork to delete`, you can then reclaim disk space by:
+    - Stopping ErsatzTV Legacy
+    - Running `sqlite3 ersatztv.sqlite3 'PRAGMA wal_checkpoint(TRUNCATE); VACUUM;'` in your config folder
+- Fix Next Engine playout sync when channel is configured to use channel logo as watermark
+
+## [26.5.0] - 2026-05-08
 ### Added
 - Add `Streaming Engine` setting to Channel
   - `Legacy` - (default) uses existing streaming engine
-  - `Next` - will use ErsatzTV Next streaming engine, when it is compatible with ErsatzTV Legacy
+  - `Next` - uses ErsatzTV Next streaming engine
+- Add `Next Engine Text Subtitle Mode` setting to Channel
+  - `Burn` - (default) will burn all subtitles, including text subtitles
+  - `Convert If Possible` - will attempt to convert text subtitles to WebVTT
+    - WebVTT subtitles can be dynamically enabled and disabled during playback in supported HLS clients
+
+### Fixed
+- Fix `Add Playout` button not opening drop down menu (regression from v26.4.0)
+- Consistently apply playout offset when generating XMLTV
+- Schedule all required fallback filler in classic schedules
+- Don't extract embedded subtitles that have already been extracted
 
 ## [26.4.0] - 2026-04-18
 ### Changed
@@ -3207,7 +3307,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Initial release to facilitate testing outside of Docker.
 
 
-[Unreleased]: https://github.com/ErsatzTV/legacy/compare/v26.4.0...HEAD
+[Unreleased]: https://github.com/ErsatzTV/legacy/compare/v26.7.0...HEAD
+[26.7.0]: https://github.com/ErsatzTV/legacy/compare/v26.6.0...v26.7.0
+[26.6.0]: https://github.com/ErsatzTV/legacy/compare/v26.5.1...v26.6.0
+[26.5.1]: https://github.com/ErsatzTV/legacy/compare/v26.5.0...v26.5.1
+[26.5.0]: https://github.com/ErsatzTV/legacy/compare/v26.4.0...v26.5.0
 [26.4.0]: https://github.com/ErsatzTV/legacy/compare/v26.3.0...v26.4.0
 [26.3.0]: https://github.com/ErsatzTV/legacy/compare/v26.2.0...v26.3.0
 [26.2.0]: https://github.com/ErsatzTV/legacy/compare/v26.1.1...v26.2.0

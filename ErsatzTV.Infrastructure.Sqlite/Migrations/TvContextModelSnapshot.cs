@@ -318,6 +318,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                         .HasColumnType("varchar(50)")
                         .UseCollation("NOCASE");
 
+                    b.Property<int>("NextEngineTextSubtitleMode")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Number")
                         .HasColumnType("TEXT");
 
@@ -5031,6 +5034,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                                     b2.Property<int>("Seed")
                                         .HasColumnType("INTEGER");
 
+                                    b2.Property<bool>("Started")
+                                        .HasColumnType("INTEGER");
+
                                     b2.HasKey("PlayoutAnchorPlayoutId");
 
                                     b2.ToTable("ScheduleItemsEnumeratorState", (string)null);
@@ -5179,6 +5185,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                             b1.Property<int>("Seed")
                                 .HasColumnType("INTEGER");
 
+                            b1.Property<bool>("Started")
+                                .HasColumnType("INTEGER");
+
                             b1.HasKey("PlayoutProgramScheduleAnchorId");
 
                             b1.ToTable("CollectionEnumeratorState", (string)null);
@@ -5227,6 +5236,9 @@ namespace ErsatzTV.Infrastructure.Sqlite.Migrations
                                 .HasColumnType("INTEGER");
 
                             b1.Property<int>("Seed")
+                                .HasColumnType("INTEGER");
+
+                            b1.Property<bool>("Started")
                                 .HasColumnType("INTEGER");
 
                             b1.HasKey("PlayoutScheduleItemFillGroupIndexId");

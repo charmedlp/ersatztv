@@ -348,13 +348,13 @@ public class TranscodingTests
         metadataRepository.When(x => x.UpdateStatistics(Arg.Any<MediaItem>(), Arg.Any<MediaVersion>(), Arg.Any<bool>()))
             .Do(x =>
             {
-                MediaVersion version = x.Arg<MediaVersion>();
-                if (version.Streams.Any(s => s.MediaStreamKind == MediaStreamKind.Video && !s.AttachedPic))
+                MediaVersion? version = x.Arg<MediaVersion>();
+                if (version != null && version.Streams.Any(s => s.MediaStreamKind == MediaStreamKind.Video && !s.AttachedPic))
                 {
                     version.MediaFiles = videoVersion.MediaFiles;
                     videoVersion = version;
                 }
-                else
+                else if (version != null)
                 {
                     version.MediaFiles = songVersion.MediaFiles;
                     songVersion = version;
@@ -375,13 +375,13 @@ public class TranscodingTests
         WatermarkSelector watermarkSelector = new WatermarkSelector(
             new MockFileSystem(),
             mockImageCache,
-            new DecoSelector(LoggerFactory.CreateLogger<DecoSelector>()),
+            new DecoSelector(),
             LoggerFactory.CreateLogger<WatermarkSelector>());
 
         List<WatermarkOptions> watermarks = [];
         foreach (var wm in GetWatermark(watermark))
         {
-            watermarks.AddRange(watermarkSelector.GetWatermarkOptions(channel, wm, Option<ChannelWatermark>.None));
+            watermarks.AddRange(watermarkSelector.GetWatermarkOptions(channel, wm, Option<ChannelWatermark>.None, shouldLogMessages: true));
         }
 
         PlayoutItemResult playoutItemResult = await service.ForPlayoutItem(
@@ -520,8 +520,11 @@ public class TranscodingTests
             .Do(args =>
             {
                 MediaVersion? version = args.Arg<MediaVersion>();
-                version.MediaFiles = v.MediaFiles;
-                v = version;
+                if (version != null)
+                {
+                    version.MediaFiles = v.MediaFiles;
+                    v = version;
+                }
             });
 
         var localStatisticsProvider = new LocalStatisticsProvider(
@@ -707,13 +710,13 @@ public class TranscodingTests
         WatermarkSelector watermarkSelector = new WatermarkSelector(
             new RealFileSystem(),
             mockImageCache,
-            new DecoSelector(LoggerFactory.CreateLogger<DecoSelector>()),
+            new DecoSelector(),
             LoggerFactory.CreateLogger<WatermarkSelector>());
 
         List<WatermarkOptions> watermarks = [];
         foreach (var wm in channelWatermark)
         {
-            watermarks.AddRange(watermarkSelector.GetWatermarkOptions(channel, wm, Option<ChannelWatermark>.None));
+            watermarks.AddRange(watermarkSelector.GetWatermarkOptions(channel, wm, Option<ChannelWatermark>.None, shouldLogMessages: true));
         }
 
         var mediaItem = new OtherVideo { MediaVersions = [v] };

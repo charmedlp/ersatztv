@@ -331,6 +331,9 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                         .HasColumnType("varchar(50)")
                         .UseCollation("utf8mb4_general_ci");
 
+                    b.Property<int>("NextEngineTextSubtitleMode")
+                        .HasColumnType("int");
+
                     b.Property<string>("Number")
                         .HasColumnType("varchar(255)");
 
@@ -5204,6 +5207,9 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                                     b2.Property<int>("Seed")
                                         .HasColumnType("int");
 
+                                    b2.Property<bool>("Started")
+                                        .HasColumnType("tinyint(1)");
+
                                     b2.HasKey("PlayoutAnchorPlayoutId");
 
                                     b2.ToTable("ScheduleItemsEnumeratorState", (string)null);
@@ -5352,6 +5358,9 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
                             b1.Property<int>("Seed")
                                 .HasColumnType("int");
 
+                            b1.Property<bool>("Started")
+                                .HasColumnType("tinyint(1)");
+
                             b1.HasKey("PlayoutProgramScheduleAnchorId");
 
                             b1.ToTable("CollectionEnumeratorState", (string)null);
@@ -5401,6 +5410,9 @@ namespace ErsatzTV.Infrastructure.MySql.Migrations
 
                             b1.Property<int>("Seed")
                                 .HasColumnType("int");
+
+                            b1.Property<bool>("Started")
+                                .HasColumnType("tinyint(1)");
 
                             b1.HasKey("PlayoutScheduleItemFillGroupIndexId");
 

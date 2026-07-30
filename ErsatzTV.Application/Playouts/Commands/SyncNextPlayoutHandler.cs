@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Globalization;
 using System.IO.Abstractions;
 using System.Runtime.InteropServices;
@@ -6,28 +5,22 @@ using System.Text;
 using CliWrap;
 using ErsatzTV.Core;
 using ErsatzTV.Core.Domain;
-using ErsatzTV.Core.Extensions;
-using ErsatzTV.Core.FFmpeg;
-using ErsatzTV.Core.Interfaces.Emby;
-using ErsatzTV.Core.Interfaces.FFmpeg;
-using ErsatzTV.Core.Interfaces.Jellyfin;
 using ErsatzTV.Core.Interfaces.Metadata;
-using ErsatzTV.Core.Interfaces.Plex;
+using ErsatzTV.Core.Interfaces.Scheduling;
 using ErsatzTV.Infrastructure.Data;
 using ErsatzTV.Infrastructure.Extensions;
+using ErsatzTV.Infrastructure.Scheduling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using CommandResult = CliWrap.CommandResult;
+using PlayoutItem = ErsatzTV.Core.Domain.PlayoutItem;
 
 namespace ErsatzTV.Application.Playouts;
 
 public partial class SyncNextPlayoutHandler(
+    IPlayoutItemConverter playoutItemConverter,
     IFileSystem fileSystem,
     ILocalFileSystem localFileSystem,
-    IPlexPathReplacementService plexPathReplacementService,
-    IJellyfinPathReplacementService jellyfinPathReplacementService,
-    IEmbyPathReplacementService embyPathReplacementService,
-    ICustomStreamSelector customStreamSelector,
-    IFFmpegStreamSelector ffmpegStreamSelector,
     IDbContextFactory<TvContext> dbContextFactory,
     ILogger<SyncNextPlayoutHandler> logger)
     : IRequestHandler<SyncNextPlayout>
@@ -125,6 +118,28 @@ public partial class SyncNextPlayoutHandler(
         List<PlayoutItem> playoutItems = await dbContext.PlayoutItems
             .AsNoTracking()
             .Where(i => i.Playout.Channel.Number == (mirrorChannelNumber ?? channelNumber))
+
+            // get playout deco
+            .Include(i => i.Playout)
+            .ThenInclude(p => p.Deco)
+            .ThenInclude(d => d.DecoWatermarks)
+            .ThenInclude(d => d.Watermark)
+            .Include(i => i.Playout)
+            .ThenInclude(p => p.Deco)
+            .ThenInclude(d => d.DecoGraphicsElements)
+            .ThenInclude(d => d.GraphicsElement)
+
+            .Include(i => i.Watermarks)
+
+            // get playout templates (and deco templates/decos)
+            .Include(i => i.Playout)
+            .ThenInclude(p => p.Templates)
+            .ThenInclude(t => t.DecoTemplate)
+            .ThenInclude(t => t.Items)
+            .ThenInclude(i => i.Deco)
+            .ThenInclude(d => d.DecoWatermarks)
+            .ThenInclude(d => d.Watermark)
+
             .Include(i => i.MediaItem)
             .ThenInclude(mi => mi.LibraryPath)
             .ThenInclude(lp => lp.Library)
@@ -137,6 +152,14 @@ public partial class SyncNextPlayoutHandler(
             .Include(i => i.MediaItem)
             .ThenInclude(i => (i as Episode).EpisodeMetadata)
             .ThenInclude(em => em.Subtitles)
+            .Include(i => i.MediaItem)
+            .ThenInclude(i => (i as Image).MediaVersions)
+            .ThenInclude(mv => mv.MediaFiles)
+            .Include(i => i.MediaItem)
+            .ThenInclude(i => (i as Image).MediaVersions)
+            .ThenInclude(mv => mv.Streams)
+            .Include(i => i.MediaItem)
+            .ThenInclude(i => (i as Image).ImageMetadata)
             .Include(i => i.MediaItem)
             .ThenInclude(i => (i as Movie).MediaVersions)
             .ThenInclude(mv => mv.MediaFiles)
@@ -161,10 +184,56 @@ public partial class SyncNextPlayoutHandler(
             .Include(i => i.MediaItem)
             .ThenInclude(i => (i as MusicVideo).MediaVersions)
             .ThenInclude(mv => mv.Streams)
+            .Include(i => i.MediaItem)
+            .ThenInclude(i => (i as RemoteStream).MediaVersions)
+            .ThenInclude(mv => mv.MediaFiles)
+            .Include(i => i.MediaItem)
+            .ThenInclude(i => (i as RemoteStream).MediaVersions)
+            .ThenInclude(mv => mv.Streams)
+            .Include(i => i.MediaItem)
+            .ThenInclude(i => (i as RemoteStream).RemoteStreamMetadata)
+            .ThenInclude(em => em.Subtitles)
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
         logger.LogDebug("Located {Count} local playout items", playoutItems.Count);
+
+        // fill in all gaps
+        playoutItems.Sort((a, b) => a.StartOffset.CompareTo(b.StartOffset));
+        if (playoutItems.Count > 0)
+        {
+            List<PlayoutItem> newPlayoutItems = [];
+            DateTimeOffset finish = DateTimeOffset.Now;
+            foreach (var playoutItem in playoutItems)
+            {
+                if (finish < playoutItem.StartOffset)
+                {
+                    newPlayoutItems.Add(
+                        new DynamicPlayoutItem
+                        {
+                            Start = finish.UtcDateTime,
+                            Finish = playoutItem.Start
+                        });
+                }
+
+                finish = playoutItem.FinishOffset;
+                newPlayoutItems.Add(playoutItem);
+            }
+
+            playoutItems = newPlayoutItems;
+        }
+
+        Option<ChannelWatermark> maybeGlobalWatermark = await dbContext.ConfigElements
+            .GetValue<int>(ConfigElementKey.FFmpegGlobalWatermarkId, cancellationToken)
+            .BindT(watermarkId => dbContext.ChannelWatermarks
+                .SelectOneAsync(w => w.Id, w => w.Id == watermarkId, cancellationToken));
+
+        Option<Channel> maybeChannelForArtwork = await dbContext.Channels
+            .AsNoTracking()
+            .Include(c => c.Watermark)
+            .Include(c => c.Artwork)
+            .SingleOrDefaultAsync(c => c.Number == channelNumber, cancellationToken)
+            .Map(Optional);
 
         foreach (IGrouping<DateTime, PlayoutItem> group in playoutItems.GroupBy(pi => pi.StartOffset.Date)
                      .Where(g => g.Any()))
@@ -176,224 +245,24 @@ public partial class SyncNextPlayoutHandler(
                 targetFolder,
                 $"{first.StartOffset.ToUnixTimeMilliseconds()}_{last.FinishOffset.ToUnixTimeMilliseconds()}.json");
 
-            var playout = new Core.Next.Playout { Version = "https://ersatztv.org/playout/version/0.0.1", Items = [] };
+            var playout = new Core.Next.Playout { Version = "https://ersatztv.org/playout/version/0.0.2", Items = [] };
             foreach (PlayoutItem playoutItem in group)
             {
-                if (playoutItem.MediaItem is not Episode && playoutItem.MediaItem is not Movie &&
-                    playoutItem.MediaItem is not OtherVideo && playoutItem.MediaItem is not MusicVideo)
+                Option<Core.Next.PlayoutItem> maybeNextPlayoutItem = await playoutItemConverter.ToNext(
+                    maybeChannelForArtwork,
+                    maybeGlobalWatermark,
+                    playoutOffset,
+                    playoutItem,
+                    cancellationToken);
+
+                foreach (var nextPlayoutItem in maybeNextPlayoutItem)
                 {
-                    continue;
+                    playout.Items.Add(nextPlayoutItem);
                 }
-
-                MediaVersion headVersion = playoutItem.MediaItem.GetHeadVersion();
-
-                playoutItem.Start += playoutOffset;
-                playoutItem.Finish += playoutOffset;
-
-                var nextPlayoutItem = new Core.Next.PlayoutItem
-                {
-                    Id = playoutItem.Id.ToString(CultureInfo.InvariantCulture),
-                    Start = playoutItem.StartOffset,
-                    Finish = playoutItem.FinishOffset
-                };
-
-                Option<Core.Next.Source> maybeSource = await SourceForItem(playoutItem, cancellationToken);
-                if (maybeSource.IsNone)
-                {
-                    continue;
-                }
-
-                foreach (Core.Next.Source source in maybeSource)
-                {
-                    nextPlayoutItem.Source = source;
-                }
-
-                // if no audio streams, use lavfi to insert silence
-                if (headVersion.Streams.All(s => s.MediaStreamKind is not MediaStreamKind.Audio))
-                {
-                    var videoSource = nextPlayoutItem.Source;
-
-                    nextPlayoutItem.Source = null;
-                    nextPlayoutItem.Tracks = new Core.Next.PlayoutItemTracks
-                    {
-                        Audio = new Core.Next.TrackSelection
-                        {
-                            Source =
-                                new Core.Next.Source
-                                {
-                                    SourceType = Core.Next.SourceType.Lavfi,
-                                    Params = "anullsrc=channel_layout=stereo:sample_rate=48000"
-                                }
-                        },
-                        Video = new Core.Next.TrackSelection
-                        {
-                            Source = new Core.Next.Source
-                            {
-                                SourceType = videoSource.SourceType,
-                                Path = videoSource.Path,
-                            }
-                        }
-                    };
-                }
-
-                maybeChannel = await dbContext.Channels
-                    .AsNoTracking()
-                    .SingleOrDefaultAsync(c => c.Number == channelNumber, cancellationToken);
-                foreach (Channel channel in maybeChannel)
-                {
-                    var audioVersion = new MediaItemAudioVersion(playoutItem.MediaItem, headVersion);
-                    await SelectTracks(
-                        channel,
-                        audioVersion,
-                        nextPlayoutItem,
-                        playoutItem.PreferredAudioLanguageCode ?? channel.PreferredAudioLanguageCode,
-                        playoutItem.PreferredAudioTitle ?? channel.PreferredAudioTitle,
-                        playoutItem.PreferredSubtitleLanguageCode ?? channel.PreferredSubtitleLanguageCode,
-                        playoutItem.SubtitleMode ?? channel.SubtitleMode,
-                        cancellationToken);
-                }
-
-                playout.Items.Add(nextPlayoutItem);
             }
 
             await fileSystem.File.WriteAllTextAsync(fileName, Core.Next.Serialize.ToJson(playout), cancellationToken);
         }
-    }
-
-    private async Task SelectTracks(
-        Channel channel,
-        MediaItemAudioVersion audioVersion,
-        Core.Next.PlayoutItem nextPlayoutItem,
-        string preferredAudioLanguage,
-        string preferredAudioTitle,
-        string preferredSubtitleLanguage,
-        ChannelSubtitleMode subtitleMode,
-        CancellationToken cancellationToken)
-    {
-        List<Subtitle> allSubtitles = await GetSubtitles(audioVersion.MediaItem);
-
-        Option<MediaStream> maybeAudioStream = Option<MediaStream>.None;
-        Option<Subtitle> maybeSubtitle = Option<Subtitle>.None;
-
-        if (channel.StreamSelectorMode is ChannelStreamSelectorMode.Custom)
-        {
-            StreamSelectorResult result = await customStreamSelector.SelectStreams(
-                channel,
-                nextPlayoutItem.Start,
-                audioVersion,
-                allSubtitles);
-            maybeAudioStream = result.AudioStream;
-            maybeSubtitle = result.Subtitle;
-        }
-
-        if (channel.StreamSelectorMode is ChannelStreamSelectorMode.Default || maybeAudioStream.IsNone)
-        {
-            maybeAudioStream =
-                await ffmpegStreamSelector.SelectAudioStream(
-                    audioVersion,
-                    channel.StreamingMode,
-                    channel,
-                    preferredAudioLanguage,
-                    preferredAudioTitle,
-                    shouldLogMessages: false,
-                    cancellationToken);
-
-            maybeSubtitle =
-                await ffmpegStreamSelector.SelectSubtitleStream(
-                    allSubtitles.ToImmutableList(),
-                    channel,
-                    preferredSubtitleLanguage,
-                    subtitleMode,
-                    shouldLogMessages: false,
-                    cancellationToken);
-        }
-
-        foreach (MediaStream audioStream in maybeAudioStream)
-        {
-            if (nextPlayoutItem.Tracks?.Audio?.StreamIndex is null)
-            {
-                nextPlayoutItem.Tracks ??= new Core.Next.PlayoutItemTracks();
-                nextPlayoutItem.Tracks.Audio ??= new Core.Next.TrackSelection();
-                nextPlayoutItem.Tracks.Audio.StreamIndex = audioStream.Index;
-            }
-        }
-
-        foreach (Subtitle subtitle in maybeSubtitle)
-        {
-            if (nextPlayoutItem.Tracks?.Subtitle?.StreamIndex is null)
-            {
-                nextPlayoutItem.Tracks ??= new Core.Next.PlayoutItemTracks();
-                nextPlayoutItem.Tracks.Subtitle ??= new Core.Next.TrackSelection();
-                nextPlayoutItem.Tracks.Subtitle.StreamIndex = subtitle.StreamIndex;
-            }
-        }
-    }
-
-    private async Task<Option<Core.Next.Source>> SourceForItem(
-        PlayoutItem playoutItem,
-        CancellationToken cancellationToken)
-    {
-        string path = await playoutItem.MediaItem.GetLocalPath(
-            plexPathReplacementService,
-            jellyfinPathReplacementService,
-            embyPathReplacementService,
-            cancellationToken);
-
-        // check filesystem first
-        if (fileSystem.File.Exists(path))
-        {
-            return new Core.Next.Source
-            {
-                SourceType = Core.Next.SourceType.Local,
-                Path = path,
-            };
-        }
-
-        MediaFile file = playoutItem.MediaItem.GetHeadVersion().MediaFiles.Head();
-        int mediaSourceId = playoutItem.MediaItem.LibraryPath.Library.MediaSourceId;
-        if (file is PlexMediaFile pmf)
-        {
-            return new Core.Next.Source
-            {
-                SourceType = Core.Next.SourceType.Http,
-                Uri = $"http://localhost:{Settings.StreamingPort}/media/plex/{mediaSourceId}/{pmf.Key}"
-            };
-        }
-
-        Option<string> jellyfinItemId = playoutItem.MediaItem switch
-        {
-            JellyfinEpisode e => e.ItemId,
-            JellyfinMovie m => m.ItemId,
-            _ => None
-        };
-
-        foreach (string itemId in jellyfinItemId)
-        {
-            return new Core.Next.Source
-            {
-                SourceType = Core.Next.SourceType.Http,
-                Uri = $"http://localhost:{Settings.StreamingPort}/media/jellyfin/{itemId}"
-            };
-        }
-
-        // attempt to remotely stream emby
-        Option<string> embyItemId = playoutItem.MediaItem switch
-        {
-            EmbyEpisode e => e.ItemId,
-            EmbyMovie m => m.ItemId,
-            _ => None
-        };
-
-        foreach (string itemId in embyItemId)
-        {
-            return new Core.Next.Source
-            {
-                SourceType = Core.Next.SourceType.Http,
-                Uri = $"http://localhost:{Settings.StreamingPort}/media/emby/{itemId}"
-            };
-        }
-
-        return Option<Core.Next.Source>.None;
     }
 
     private void CleanOldVersions(
@@ -454,39 +323,5 @@ public partial class SyncNextPlayoutHandler(
                 logger.LogDebug("Skipping busy folder: {Folder}", dir.Name);
             }
         }
-    }
-
-    private static async Task<List<Subtitle>> GetSubtitles(MediaItem mediaItem)
-    {
-        List<Subtitle> allSubtitles = mediaItem switch
-        {
-            Episode episode => await Optional(episode.EpisodeMetadata).Flatten().HeadOrNone()
-                .Map(mm => mm.Subtitles ?? [])
-                .IfNoneAsync([]),
-            Movie movie => await Optional(movie.MovieMetadata).Flatten().HeadOrNone()
-                .Map(mm => mm.Subtitles ?? [])
-                .IfNoneAsync([]),
-            //MusicVideo musicVideo => await GetMusicVideoSubtitles(musicVideo, channel, settings),
-            OtherVideo otherVideo => await Optional(otherVideo.OtherVideoMetadata).Flatten().HeadOrNone()
-                .Map(mm => mm.Subtitles ?? [])
-                .IfNoneAsync([]),
-            _ => []
-        };
-
-        bool isMediaServer = mediaItem is PlexMovie or PlexEpisode or
-            JellyfinMovie or JellyfinEpisode or EmbyMovie or EmbyEpisode;
-
-        if (isMediaServer)
-        {
-            return [];
-
-            // closed captions are currently unsupported
-            //allSubtitles.RemoveAll(s => s.Codec == "eia_608");
-        }
-
-        // TODO: support text subtitles; external image subtitles
-        allSubtitles.RemoveAll(s => !s.IsImage || s.SubtitleKind is not SubtitleKind.Embedded);
-
-        return allSubtitles;
     }
 }

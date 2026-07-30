@@ -15,13 +15,12 @@ public sealed class SeasonEpisodeMediaCollectionEnumerator : IMediaCollectionEnu
     {
         CurrentIncludeInProgramGuide = Option<bool>.None;
 
-        _sortedMediaItems = mediaItems
-            .Filter(mi => (mi is not Episode episode) || (episode.Season?.SeasonNumber ?? 0) > 0)
+        _sortedMediaItems = Playable(mediaItems)
             .OrderBy(identity, new SeasonEpisodeMediaComparer()).ToList();
         _lazyMinimumDuration = new Lazy<Option<TimeSpan>>(() =>
             _sortedMediaItems.Bind(i => i.GetNonZeroDuration()).OrderBy(identity).HeadOrNone());
 
-        State = new CollectionEnumeratorState { Seed = state.Seed };
+        State = new CollectionEnumeratorState { Seed = state.Seed, Started = state.Started };
 
         if (state.Index >= _sortedMediaItems.Count)
         {
@@ -35,9 +34,16 @@ public sealed class SeasonEpisodeMediaCollectionEnumerator : IMediaCollectionEnu
         }
     }
 
-    public void ResetState(CollectionEnumeratorState state) =>
+    // shared with callers that need to know what this will play, not what they handed it
+    public static List<MediaItem> Playable(IEnumerable<MediaItem> mediaItems) =>
+        mediaItems.Filter(mi => (mi is not Episode episode) || (episode.Season?.SeasonNumber ?? 0) > 0).ToList();
+
+    public void ResetState(CollectionEnumeratorState state)
+    {
         // seed doesn't matter here
         State.Index = state.Index;
+        State.Started = state.Started;
+    }
 
     public string SchedulingContextName => "Season, Episode";
 
@@ -54,6 +60,7 @@ public sealed class SeasonEpisodeMediaCollectionEnumerator : IMediaCollectionEnu
         }
 
         State.Index = (State.Index + 1) % _sortedMediaItems.Count;
+        State.Started = true;
     }
 
     public Option<TimeSpan> MinimumDuration => _lazyMinimumDuration.Value;
