@@ -161,8 +161,15 @@ public abstract class PlayoutModeSchedulerBase<T>(ILogger logger) : IPlayoutMode
 
                 if (nextState.CurrentTime + itemDuration > nextItemStart)
                 {
+                    TimeSpan remaining = nextItemStart - nextState.CurrentTime;
+                    if (remaining < enumerator.MinimumDuration)
+                    {
+                        break;
+                    }
+
                     warnings.TailFillerTooLong++;
-                    break;
+                    enumerator.MoveNext(nextState.CurrentTime);
+                    continue;
                 }
 
                 var playoutItem = new PlayoutItem

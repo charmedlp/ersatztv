@@ -129,6 +129,7 @@ public class PlayoutModeSchedulerDuration(ILogger logger)
                     };
 
                     nextState.ScheduleItemsEnumerator.MoveNext();
+                    break;
                 }
                 else
                 {
