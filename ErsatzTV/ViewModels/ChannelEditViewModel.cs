@@ -34,7 +34,14 @@ public class ChannelEditViewModel
     public StreamingEngine StreamingEngine
     {
         get;
-        set;
+        set
+        {
+            field = value;
+            if (value is StreamingEngine.Next)
+            {
+                StreamingMode = StreamingMode.HttpLiveStreamingSegmenter;
+            }
+        }
     }
 
     public NextEngineTextSubtitleMode NextEngineTextSubtitleMode { get; set; }

@@ -1189,6 +1189,7 @@ public class TranscodingTests
             Channel channel,
             string preferredAudioLanguage,
             string preferredAudioTitle,
+            bool shouldLogMessages,
             CancellationToken cancellationToken) =>
             Optional(version.MediaVersion.Streams.FirstOrDefault(s => s.MediaStreamKind == MediaStreamKind.Audio))
                 .AsTask();

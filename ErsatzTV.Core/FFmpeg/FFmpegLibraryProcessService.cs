@@ -154,6 +154,7 @@ public class FFmpegLibraryProcessService : IFFmpegProcessService
                     channel,
                     preferredAudioLanguage,
                     preferredAudioTitle,
+                    shouldLogMessages: true,
                     cancellationToken);
 
             maybeSubtitle =
